@@ -19,6 +19,26 @@ export const COMPONENT_TYPES = {
       { id: '2', label: '2', x: 15, y: 20 }
     ]
   },
+  PULSANTE: {
+    id: 'puls_base',
+    name: 'Pulsante N.O.',
+    type: 'PULSANTE',
+    terminals: [
+      { id: 'L', label: 'L', x: 0, y: -25 },
+      { id: '1', label: '1', x: 0, y: 25 }
+    ]
+  },
+  RELE: {
+    id: 'rele_base',
+    name: 'Relè Passo-Passo',
+    type: 'RELE',
+    terminals: [
+      { id: 'A1', label: 'A1', x: -20, y: -35 },
+      { id: 'A2', label: 'A2', x: 20, y: -35 },
+      { id: '1', label: '1', x: -20, y: 35 },
+      { id: '2', label: '2', x: 20, y: 35 }
+    ]
+  },
   LAMPADA: {
     id: 'lamp_base',
     name: 'Punto Luce',

@@ -43,6 +43,11 @@ function createDeviceGroup(devData, x, y) {
     const line2 = new fabric.Line([-20, 20, 20, -20], { stroke: '#f39c12', strokeWidth: 2 });
     shapes.push(body, line1, line2);
 
+  } else if (devData.type === 'RELE') {
+    const body = new fabric.Rect({ left: -35, top: -50, width: 70, height: 100, fill: '#ffffff', stroke: '#2c3e50', strokeWidth: 3, rx: 4, ry: 4 });
+    const title = new fabric.Text('RELÈ', { left: -18, top: -10, fontSize: 12, fill: '#2c3e50', fontWeight: 'bold' });
+    shapes.push(body, title);
+
   } else if (devData.type === 'MAGNETOTERMICO') {
     const body = new fabric.Rect({ left: -35, top: -50, width: 70, height: 100, fill: '#f8f9fa', stroke: '#2c3e50', strokeWidth: 3, rx: 4, ry: 4 });
     const leverBg = new fabric.Rect({ left: -15, top: -15, width: 30, height: 30, fill: '#bdc3c7', rx: 3, ry: 3 });
@@ -52,9 +57,18 @@ function createDeviceGroup(devData, x, y) {
 
   } else {
     const body = new fabric.Rect({ left: -25, top: -40, width: 50, height: 80, fill: '#ecf0f1', stroke: '#34495e', strokeWidth: 2, rx: 5, ry: 5 });
-    const titleText = devData.type === 'INTERRUTTORE' ? 'INT' : 'DEV';
-    const title = new fabric.Text(titleText, { left: -10, top: -36, fontSize: 9, fill: '#7f8c8d', fontWeight: 'bold' });
-    const toggleBtn = new fabric.Rect({ left: -15, top: -10, width: 30, height: 30, fill: '#e74c3c', rx: 3, ry: 3, name: 'toggle_btn' });
+    let titleText = 'INT';
+    if (devData.type === 'DEVIATORE') titleText = 'DEV';
+    if (devData.type === 'PULSANTE') titleText = 'PULS';
+
+    const title = new fabric.Text(titleText, { left: -12, top: -36, fontSize: 9, fill: '#7f8c8d', fontWeight: 'bold' });
+    
+    let toggleBtn;
+    if (devData.type === 'PULSANTE') {
+      toggleBtn = new fabric.Circle({ left: -12, top: -8, radius: 12, fill: '#3498db', name: 'toggle_btn' });
+    } else {
+      toggleBtn = new fabric.Rect({ left: -15, top: -10, width: 30, height: 30, fill: '#e74c3c', rx: 3, ry: 3, name: 'toggle_btn' });
+    }
     shapes.push(body, title, toggleBtn);
   }
 
@@ -78,7 +92,7 @@ function createDeviceGroup(devData, x, y) {
     left: x, top: y, originX: 'center', originY: 'center',
     hasControls: false, borderColor: '#3498db', hoverCursor: 'grab',
     componentData: devData,
-    deviceState: { isOpen: true, position: '1' } 
+    deviceState: { isOpen: true, position: '1', isPressed: false, relayState: false, coilEnergized: false }
   });
 }
 
@@ -97,7 +111,6 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
     if (!fabCanvas.current) return;
     try {
       const res = simulateCircuit(fabCanvas.current);
-
       const allObjects = fabCanvas.current.getObjects();
       const groups = allObjects.filter(o => o.type === 'group');
       
@@ -110,7 +123,6 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
           }
         }
       });
-
       fabCanvas.current.requestRenderAll();
       if (onSimUpdate) onSimUpdate(res);
     } catch (err) {
@@ -123,10 +135,8 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
       if (!fabCanvas.current) return;
       const devData = COMPONENT_TYPES[componentType];
       if (!devData) return;
-
       const randomOffset = Math.floor(Math.random() * 40) - 20;
       const compGroup = createDeviceGroup(devData, 400 + randomOffset, 300 + randomOffset);
-
       fabCanvas.current.add(compGroup);
       fabCanvas.current.renderAll();
     },
@@ -152,8 +162,7 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
     if (currentMode === 'SIMULATE') {
       canvas.getObjects().forEach(obj => {
         obj.set({ selectable: false });
-        // UX: Mostra la manina se il componente è cliccabile!
-        if (obj.componentData && ['INTERRUTTORE', 'DEVIATORE', 'MAGNETOTERMICO'].includes(obj.componentData.type)) {
+        if (obj.componentData && ['INTERRUTTORE', 'DEVIATORE', 'PULSANTE', 'MAGNETOTERMICO'].includes(obj.componentData.type)) {
           obj.set({ hoverCursor: 'pointer' });
         }
       });
@@ -161,7 +170,7 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
     } else {
       canvas.getObjects().forEach(obj => {
         if (!obj.isGridLine && !obj.isFixedSupply) {
-          obj.set({ selectable: true, hoverCursor: 'grab' });
+          obj.set({ selectable: true, hoverCursor: obj.type === 'line' ? 'pointer' : 'grab' });
         }
         if (obj.componentData && obj.componentData.type === 'LAMPADA') {
           const objs = obj.getObjects ? obj.getObjects() : obj._objects || [];
@@ -193,61 +202,72 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
     canvas.add(pSupply);
 
     canvas.on('mouse:down', (o) => {
-      // --- LOGICA CLICK MODALITÀ SIMULA ---
       if (modeRef.current === 'SIMULATE') {
         if (o.target && o.target.type === 'group' && o.target.componentData) {
           const g = o.target;
           const type = g.componentData.type;
           const objs = g.getObjects ? g.getObjects() : g._objects || [];
 
-          if (type === 'INTERRUTTORE' || type === 'MAGNETOTERMICO') {
+          if (type === 'PULSANTE') {
+            g.deviceState.isPressed = true;
+            const btn = objs.find(item => item.name === 'toggle_btn');
+            if (btn) btn.set({ fill: '#2ed573' });
+          } else if (type === 'INTERRUTTORE') {
             g.deviceState.isOpen = !g.deviceState.isOpen;
             const btn = objs.find(item => item.name === 'toggle_btn' || item.name === 'lever');
             if (btn) btn.set({ fill: g.deviceState.isOpen ? '#e74c3c' : '#2ed573' });
-
           } else if (type === 'DEVIATORE') {
             g.deviceState.position = g.deviceState.position === '1' ? '2' : '1';
             const btn = objs.find(item => item.name === 'toggle_btn');
             if (btn) btn.set({ fill: g.deviceState.position === '1' ? '#e74c3c' : '#3498db' });
+          } else if (type === 'MAGNETOTERMICO') {
+            // 1. Inverte lo stato logico: se era aperto (true) diventa chiuso (false) e viceversa
+            g.deviceState.isOpen = !g.deviceState.isOpen;
+            const btn = objs.find(item => item.name === 'toggle_btn'|| item.name === 'lever');
+            if (btn) btn.set({ fill: g.deviceState.isOpen ? '#e74c3c' : '#2ecc71' });
+            
+            // 3. Aggiorna la grafica
+            canvas.renderAll();
+
+            // 4. (FONDAMENTALE) Ricalcola il circuito dopo aver cambiato lo stato!
+            const esito = simulateCircuit(canvas);
+            // Richiama la funzione che usi per aggiornare l'interfaccia (es. setMessage o setStatoCircuito)
+            // setStatoCircuito(esito); 
           }
-          
           updateSim();
         }
-        return; // Interrompe il resto della funzione (niente cavi disegnati in SIMULA)
+        return; // Fine blocco SIMULA
       }
 
-      // --- LOGICA DISEGNO MODALITÀ PROGETTA ---
+      // --- INIZIO DISEGNO IN MODALITÀ PROGETTA ---
       const pointer = canvas.getPointer(o.e);
       let startX = pointer.x;
       let startY = pointer.y;
       
       let snapPoint = null;
-      const SNAP_RADIUS_START = 20;
-
+      const SNAP_RADIUS = 20;
       const allObjects = canvas.getObjects();
-      const groups = allObjects.filter(obj => obj.type === 'group');
       
+      // Radar 1: Cerca morsetti dei componenti
+      const groups = allObjects.filter(obj => obj.type === 'group');
       groups.forEach(group => {
         if (group.componentData) {
           group.componentData.terminals.forEach(term => {
             const absX = group.left + term.x;
             const absY = group.top + term.y;
-            const dist = Math.sqrt(Math.pow(pointer.x - absX, 2) + Math.pow(pointer.y - absY, 2));
-            if (dist < SNAP_RADIUS_START) {
+            if (Math.hypot(pointer.x - absX, pointer.y - absY) < SNAP_RADIUS) {
               snapPoint = { x: absX, y: absY };
             }
           });
         }
       });
 
+      // Radar 2: Cerca terminali dei fili pre-esistenti
       if (!snapPoint) {
         const lines = allObjects.filter(l => l.type === 'line' && !l.isGridLine);
         for (let l of lines) {
-          const dist1 = Math.sqrt(Math.pow(pointer.x - l.x1, 2) + Math.pow(pointer.y - l.y1, 2));
-          const dist2 = Math.sqrt(Math.pow(pointer.x - l.x2, 2) + Math.pow(pointer.y - l.y2, 2));
-          
-          if (dist1 < SNAP_RADIUS_START) { snapPoint = { x: l.x1, y: l.y1 }; break; }
-          if (dist2 < SNAP_RADIUS_START) { snapPoint = { x: l.x2, y: l.y2 }; break; }
+          if (Math.hypot(pointer.x - l.x1, pointer.y - l.y1) < SNAP_RADIUS) { snapPoint = { x: l.x1, y: l.y1 }; break; }
+          if (Math.hypot(pointer.x - l.x2, pointer.y - l.y2) < SNAP_RADIUS) { snapPoint = { x: l.x2, y: l.y2 }; break; }
         }
       }
 
@@ -256,22 +276,30 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
         startY = snapPoint.y;
       }
 
+      // Evita di disegnare se abbiamo cliccato sul corpo (e non sul morsetto) di un componente per trascinarlo
       if (o.target && !o.target.isGridLine) {
-        if (!snapPoint && o.target.type === 'group' && !o.target.isFixedSupply) {
-          return;
+        if (o.target.type === 'group' && !o.target.isFixedSupply) {
+          if (!snapPoint) return; // Lascia che Fabric sposti il componente
+          o.target.set({ lockMovementX: true, lockMovementY: true }); // Blocca per disegnare
         }
-        o.target.set({ lockMovementX: true, lockMovementY: true });
       }
 
       canvas.discardActiveObject();
-
       isDrawing.current = true;
-      const points = [startX, startY, startX, startY];
-      const line = new fabric.Line(points, {
-        strokeWidth: 5, stroke: colorRef.current, 
-        selectable: true, evented: true, hasControls: false,       
-        hasBorders: true, borderColor: '#e74c3c', hoverCursor: 'pointer'    
+      
+      const line = new fabric.Line([startX, startY, startX, startY], {
+        strokeWidth: 5, 
+        stroke: colorRef.current, 
+        selectable: true, 
+        evented: true, 
+        hasControls: false,       
+        hasBorders: true, 
+        borderColor: '#e74c3c', 
+        hoverCursor: 'pointer',
+        lockMovementX: true, // Impedisce in modo assoluto il trascinamento accidentale dei fili
+        lockMovementY: true
       });
+      
       currentLine.current = line;
       canvas.add(line);
     });
@@ -279,8 +307,8 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
     canvas.on('mouse:move', (o) => {
       if (modeRef.current === 'SIMULATE') return;
       if (!isDrawing.current || !currentLine.current) return;
-      const pointer = canvas.getPointer(o.e);
       
+      const pointer = canvas.getPointer(o.e);
       let snapPoint = null;
       const SNAP_RADIUS = 20;
       const allObjects = canvas.getObjects();
@@ -291,8 +319,7 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
           group.componentData.terminals.forEach(term => {
             const absX = group.left + term.x;
             const absY = group.top + term.y;
-            const dist = Math.sqrt(Math.pow(pointer.x - absX, 2) + Math.pow(pointer.y - absY, 2));
-            if (dist < SNAP_RADIUS) {
+            if (Math.hypot(pointer.x - absX, pointer.y - absY) < SNAP_RADIUS) {
               snapPoint = { x: absX, y: absY };
             }
           });
@@ -302,12 +329,8 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
       if (!snapPoint) {
         const lines = allObjects.filter(l => l.type === 'line' && l !== currentLine.current && !l.isGridLine);
         for (let l of lines) {
-          if (Math.sqrt(Math.pow(pointer.x - l.x1, 2) + Math.pow(pointer.y - l.y1, 2)) < SNAP_RADIUS) {
-            snapPoint = { x: l.x1, y: l.y1 }; break;
-          }
-          if (Math.sqrt(Math.pow(pointer.x - l.x2, 2) + Math.pow(pointer.y - l.y2, 2)) < SNAP_RADIUS) {
-            snapPoint = { x: l.x2, y: l.y2 }; break;
-          }
+          if (Math.hypot(pointer.x - l.x1, pointer.y - l.y1) < SNAP_RADIUS) { snapPoint = { x: l.x1, y: l.y1 }; break; }
+          if (Math.hypot(pointer.x - l.x2, pointer.y - l.y2) < SNAP_RADIUS) { snapPoint = { x: l.x2, y: l.y2 }; break; }
         }
       }
 
@@ -329,13 +352,28 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
     });
 
     canvas.on('mouse:up', (o) => {
-      if (modeRef.current === 'SIMULATE') return;
+      if (modeRef.current === 'SIMULATE') {
+        const allObjects = canvas.getObjects();
+        const groups = allObjects.filter(obj => obj.type === 'group');
+        groups.forEach(g => {
+          if (g.componentData && g.componentData.type === 'PULSANTE' && g.deviceState.isPressed) {
+            g.deviceState.isPressed = false;
+            const objs = g.getObjects ? g.getObjects() : g._objects || [];
+            const btn = objs.find(item => item.name === 'toggle_btn');
+            if (btn) btn.set({ fill: '#3498db' });
+          }
+        });
+        updateSim();
+        return;
+      }
+
       isDrawing.current = false;
 
       if (currentLine.current) {
         const dx = Math.abs(currentLine.current.x2 - currentLine.current.x1);
         const dy = Math.abs(currentLine.current.y2 - currentLine.current.y1);
         
+        // Cancella le linee lunghe meno di 3 pixel (clic involontario)
         if (dx < 3 && dy < 3) {
           canvas.remove(currentLine.current); 
           if (o.target && !o.target.isGridLine) {
@@ -347,8 +385,9 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
         currentLine.current = null;
       }
 
+      // Sblocca il movimento, ma SOLO per i componenti, non per i fili
       canvas.getObjects().forEach(obj => {
-        if (!obj.isFixedSupply) {
+        if (obj.type === 'group' && !obj.isFixedSupply) {
           obj.set({ lockMovementX: false, lockMovementY: false });
         }
       });
@@ -360,7 +399,7 @@ const Workspace = forwardRef(({ currentMode, wireColor, onSimUpdate }, ref) => {
       if (modeRef.current === 'SIMULATE') return;
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const activeObjects = canvas.getActiveObjects();
-        const deletable = activeObjects.filter(obj => !obj.isFixedSupply);
+        const deletable = activeObjects.filter(obj => !obj.isFixedSupply && !obj.isGridLine);
         if (deletable.length > 0) {
           deletable.forEach(obj => canvas.remove(obj));
           canvas.discardActiveObject();
